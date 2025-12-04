@@ -5,6 +5,7 @@ import json
 import time
 import random
 import math
+import uuid
 
 from game_config import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
@@ -41,7 +42,7 @@ WEAPON_STATS = {
 def get_weapon_stats(name: str):
     return WEAPON_STATS.get(name, WEAPON_STATS["basic"])
 
-def create_new_player():
+def create_new_player(existing_uid=None):
     for _ in range(200):
         x = random.randint(TANK_SIZE, SCREEN_WIDTH - TANK_SIZE)
         y = random.randint(TANK_SIZE, SCREEN_HEIGHT - TANK_SIZE)
@@ -51,6 +52,7 @@ def create_new_player():
         x = SCREEN_WIDTH // 2
         y = SCREEN_HEIGHT // 2
     return {
+        "uid": existing_uid or uuid.uuid4().hex,
         "x": x,
         "y": y,
         "dir": "up",
@@ -65,7 +67,8 @@ def handle_client(conn, addr, player_id):
     global inputs, players
     print(f"[SERVER] Player {player_id} connected from {addr}")
 
-    init_msg = {"type": "init", "player_id": player_id}
+    uid = players.get(player_id, {}).get("uid")
+    init_msg = {"type": "init", "player_id": player_id, "player_uid": uid}
     conn.sendall((json.dumps(init_msg) + "\n").encode())
 
     buffer = ""
@@ -321,7 +324,7 @@ def update_game(dt):
                     print(f"[SERVER] Player {pid} hit! HP = {p['hp']}")
                     if p["hp"] <= 0:
                         print(f"[SERVER] Player {pid} died. Respawning.")
-                        new_state = create_new_player()
+                        new_state = create_new_player(players[pid].get("uid"))
                         players[pid].update(new_state)
                         _clear_traps(pid)
                     hit_any = True
@@ -356,7 +359,7 @@ def update_game(dt):
                     print(f"[SERVER] Player {pid} hit a trap! HP = {player['hp']}")
                     if player["hp"] <= 0:
                         print(f"[SERVER] Player {pid} died from trap. Respawning.")
-                        new_state = create_new_player()
+                        new_state = create_new_player(players[pid].get("uid"))
                         players[pid].update(new_state)
                         _clear_traps(pid)
                     owner = players.get(t["owner"])
@@ -374,6 +377,7 @@ def broadcast_state(connections):
         export_players = {}
         for pid, p in players.items():
             export_players[pid] = {
+                "uid": p.get("uid"),
                 "x": p["x"],
                 "y": p["y"],
                 "dir": p["dir"],

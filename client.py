@@ -37,6 +37,7 @@ BULLET_PALETTE = [
 ]
 
 player_id = None
+player_uid = None
 players = {}
 bullets = []
 powerups = []
@@ -66,7 +67,7 @@ def bullet_color_for_owner(owner):
         return COLOR_BULLET
 
 def network_thread(sock):
-    global player_id, players, bullets, powerups, traps, running
+    global player_id, player_uid, players, bullets, powerups, traps, running
 
     buffer = ""
     try:
@@ -89,7 +90,8 @@ def network_thread(sock):
 
                 if msg.get("type") == "init":
                     player_id = msg["player_id"]
-                    print(f"[CLIENT] My player_id = {player_id}")
+                    player_uid = msg.get("player_uid")
+                    print(f"[CLIENT] My player_id = {player_id} | uid = {player_uid}")
                 elif msg.get("type") == "state":
                     with state_lock:
                         players = msg.get("players", {})
@@ -119,7 +121,7 @@ def draw_bar(surface, x, y, w, h, value, color):
         pygame.draw.rect(surface, color, (x + 2, y + 2, int((w - 4) * value), h - 4), border_radius=4)
 
 
-def draw_hud(screen, font, small_font, panel_img, fps, server_ip, current_player_id, current_players):
+def draw_hud(screen, font, small_font, panel_img, fps, server_ip, current_player_id, current_player_uid, current_players):
     """
     Modern HUD: glass panel, bars, and clear CTA text.
     """
@@ -130,11 +132,12 @@ def draw_hud(screen, font, small_font, panel_img, fps, server_ip, current_player
     weapon_timer = me.get("weapon_timer", 0) if me else 0
     trap_cd = me.get("trap_cooldown", 0) if me else 0
     traps_active = me.get("active_traps", 0) if me else 0
+    uid_display = (current_player_uid or "")[:8]
 
     texts = [
         ("LAN TANKS", font, True),
         (f"Server {server_ip}", small_font, False),
-        (f"Player {current_player_id if current_player_id else 'connecting...'} | Online {len(current_players)}", small_font, False),
+        (f"Player {current_player_id if current_player_id else 'connecting...'} ({uid_display or 'uid...'}) | Online {len(current_players)}", small_font, False),
         (f"FPS {int(fps)}", small_font, False),
         (f"Weapon {weapon_name}", small_font, False),
         (f"Traps {traps_active}/{TRAP_MAX_ACTIVE}", small_font, False),
@@ -353,11 +356,15 @@ def main():
                 else:
                     secondary_weapons.draw(screen, tank_rect, direction)
 
-            # HP text
+            # Player identifiers + HP text
+            uid_text = p.get("uid")
+            if uid_text:
+                uid_label = small_font.render(uid_text[:8], True, COLOR_TEXT)
+                screen.blit(uid_label, (x, y - 36))
             hp_text = font.render(f"HP:{p['hp']}", True, COLOR_TEXT)
             screen.blit(hp_text, (x, y - 18))
 
-        draw_hud(screen, font, small_font, hud_panel, clock.get_fps(), server_ip, player_id, current_players)
+        draw_hud(screen, font, small_font, hud_panel, clock.get_fps(), server_ip, player_id, player_uid, current_players)
 
         pygame.display.flip()
 
