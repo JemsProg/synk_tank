@@ -35,6 +35,7 @@ WEAPON_STATS = {
     "rapid": {"speed": BULLET_SPEED + 3, "damage": 1, "count": 1, "spread_deg": 0},
     "heavy": {"speed": BULLET_SPEED + 1, "damage": 2, "count": 1, "spread_deg": 0},
     "spread": {"speed": BULLET_SPEED, "damage": 1, "count": 3, "spread_deg": 14},
+    "bouncy": {"speed": BULLET_SPEED, "damage": 1, "count": 1, "spread_deg": 0, "bounces": 3},
 }
 
 def get_weapon_stats(name: str):
@@ -112,7 +113,7 @@ def _spawn_powerups(now: float):
             break
     else:
         return
-    ptype = random.choice(["rapid", "heavy", "spread"])
+    ptype = random.choice(["rapid", "heavy", "spread", "bouncy"])
     powerups.append({"x": px, "y": py, "type": ptype})
     last_powerup_spawn = now
 
@@ -142,6 +143,14 @@ def _collides_obstacle(x, y, size):
         if _rect_overlap(x, y, size, size, ob["x"], ob["y"], ob["w"], ob["h"]):
             return True
     return False
+
+
+def _bullet_hits_solid(x, y):
+    if x < 0 or x > SCREEN_WIDTH or y < 0 or y > SCREEN_HEIGHT:
+        return True
+    bx = x - BULLET_SIZE / 2
+    by = y - BULLET_SIZE / 2
+    return _collides_obstacle(bx, by, BULLET_SIZE)
 
 
 def update_game(dt):
@@ -244,6 +253,7 @@ def update_game(dt):
                         "dy": dy_b,
                         "owner": pid,
                         "dmg": stats.get("damage", 1),
+                        "bounces": stats.get("bounces", 0),
                     })
             elif not is_shooting:
                 shot_locks[pid] = False
@@ -251,15 +261,35 @@ def update_game(dt):
         # update bullets + hits
         moved_bullets = []
         for b in bullets:
-            b["x"] += b["dx"]
-            b["y"] += b["dy"]
+            old_x, old_y = b["x"], b["y"]
+            new_x = old_x + b["dx"]
+            new_y = old_y + b["dy"]
 
-            if (b["x"] < 0 or b["x"] > SCREEN_WIDTH or
-                b["y"] < 0 or b["y"] > SCREEN_HEIGHT):
+            hit_solid = _bullet_hits_solid(new_x, new_y)
+            if hit_solid and b.get("bounces", 0) > 0:
+                # try axis-wise reflection to avoid sticking inside walls
+                hit_x = _bullet_hits_solid(old_x + b["dx"], old_y)
+                hit_y = _bullet_hits_solid(old_x, old_y + b["dy"])
+                if hit_x and not hit_y:
+                    b["dx"] = -b["dx"]
+                elif hit_y and not hit_x:
+                    b["dy"] = -b["dy"]
+                else:
+                    b["dx"] = -b["dx"]
+                    b["dy"] = -b["dy"]
+                b["bounces"] -= 1
+                new_x = old_x + b["dx"]
+                new_y = old_y + b["dy"]
+                if _bullet_hits_solid(new_x, new_y):
+                    continue  # stuck: discard
+                b["x"], b["y"] = new_x, new_y
+                moved_bullets.append(b)
                 continue
-            bx, by, _, _ = _bullet_rect(b)
-            if _collides_obstacle(bx, by, BULLET_SIZE):
+
+            if hit_solid:
                 continue
+
+            b["x"], b["y"] = new_x, new_y
             moved_bullets.append(b)
 
         # bullet vs bullet collisions (remove both on hit, only if different owners)
