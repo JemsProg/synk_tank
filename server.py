@@ -4,27 +4,54 @@ import threading
 import json
 import time
 import random
+import math
 
 from game_config import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
     TANK_SIZE, TANK_SPEED,
     BULLET_SPEED, BULLET_SIZE,
     TANK_HP,
+    POWERUP_SIZE, POWERUP_RESPAWN_TIME, POWERUP_MAX, POWERUP_DURATION,
+    TRAP_SIZE, TRAP_DAMAGE, TRAP_COOLDOWN, TRAP_MAX_ACTIVE,
     SERVER_TICK_RATE,
     SERVER_HOST, SERVER_PORT
 )
 
-players = {}      # player_id -> {x, y, dir, hp}
+players = {}      # player_id -> {x, y, dir, hp, weapon, weapon_expires, trap_ready_at, active_traps}
 inputs = {}       # player_id -> latest input dict
-bullets = []      # list of {x, y, dx, dy, owner}
+bullets = []      # list of {x, y, dx, dy, owner, dmg}
+shot_locks = {}   # player_id -> whether shoot is already handled (prevents autofire)
+trap_locks = {}   # player_id -> prevents repeated trap placement while held down
+traps = []        # list of {x, y, owner}
+powerups = []     # list of {x, y, type}
+last_powerup_spawn = 0.0
 
 lock = threading.Lock()
 next_player_id = 1
 
+WEAPON_STATS = {
+    "basic": {"speed": BULLET_SPEED, "damage": 1, "count": 1, "spread_deg": 0},
+    "rapid": {"speed": BULLET_SPEED + 3, "damage": 1, "count": 1, "spread_deg": 0},
+    "heavy": {"speed": BULLET_SPEED + 1, "damage": 2, "count": 1, "spread_deg": 0},
+    "spread": {"speed": BULLET_SPEED, "damage": 1, "count": 3, "spread_deg": 14},
+}
+
+def get_weapon_stats(name: str):
+    return WEAPON_STATS.get(name, WEAPON_STATS["basic"])
+
 def create_new_player():
     x = random.randint(TANK_SIZE, SCREEN_WIDTH - TANK_SIZE)
     y = random.randint(TANK_SIZE, SCREEN_HEIGHT - TANK_SIZE)
-    return {"x": x, "y": y, "dir": "up", "hp": TANK_HP}
+    return {
+        "x": x,
+        "y": y,
+        "dir": "up",
+        "hp": TANK_HP,
+        "weapon": "basic",
+        "weapon_expires": 0.0,
+        "trap_ready_at": 0.0,
+        "active_traps": 0,
+    }
 
 def handle_client(conn, addr, player_id):
     global inputs, players
@@ -61,12 +88,47 @@ def handle_client(conn, addr, player_id):
                 del players[player_id]
             if player_id in inputs:
                 del inputs[player_id]
+            shot_locks.pop(player_id, None)
+            trap_locks.pop(player_id, None)
         conn.close()
 
+def _spawn_powerups(now: float):
+    global last_powerup_spawn, powerups
+    if len(powerups) >= POWERUP_MAX:
+        return
+    if now - last_powerup_spawn < POWERUP_RESPAWN_TIME:
+        return
+    px = random.randint(POWERUP_SIZE, SCREEN_WIDTH - POWERUP_SIZE)
+    py = random.randint(POWERUP_SIZE, SCREEN_HEIGHT - POWERUP_SIZE)
+    ptype = random.choice(["rapid", "heavy", "spread"])
+    powerups.append({"x": px, "y": py, "type": ptype})
+    last_powerup_spawn = now
+
+
+def _rect_hit(x1, y1, size1, x2, y2, size2):
+    return (x1 < x2 + size2 and x1 + size1 > x2 and
+            y1 < y2 + size2 and y1 + size1 > y2)
+
+
+def _clear_traps(owner_id: int):
+    global traps
+    traps = [t for t in traps if t["owner"] != owner_id]
+
+
 def update_game(dt):
-    global players, bullets
+    global players, bullets, traps, powerups
+    now = time.time()
 
     with lock:
+        _spawn_powerups(now)
+
+        # expire temporary weapons
+        for player in players.values():
+            if player.get("weapon") != "basic" and now > player.get("weapon_expires", 0):
+                player["weapon"] = "basic"
+                player["weapon_expires"] = 0.0
+
+        # movement + actions
         for pid, player in players.items():
             keys = inputs.get(pid, {})
 
@@ -88,21 +150,55 @@ def update_game(dt):
             player["x"] = max(0, min(SCREEN_WIDTH - TANK_SIZE, player["x"] + dx))
             player["y"] = max(0, min(SCREEN_HEIGHT - TANK_SIZE, player["y"] + dy))
 
-            if keys.get("shoot") and not keys.get("shoot_handled", False):
-                keys["shoot_handled"] = True
+            # traps
+            is_trap = keys.get("trap", False)
+            if not trap_locks.get(pid, False):
+                trap_locks[pid] = False
+            if is_trap and not trap_locks[pid]:
+                if player["active_traps"] < TRAP_MAX_ACTIVE and now >= player["trap_ready_at"]:
+                    tx = player["x"] + TANK_SIZE // 2 - TRAP_SIZE // 2
+                    ty = player["y"] + TANK_SIZE // 2 - TRAP_SIZE // 2
+                    traps.append({"x": tx, "y": ty, "owner": pid})
+                    player["active_traps"] += 1
+                    player["trap_ready_at"] = now + TRAP_COOLDOWN
+                trap_locks[pid] = True
+            elif not is_trap:
+                trap_locks[pid] = False
+
+            # shooting
+            is_shooting = keys.get("shoot", False)
+            if not shot_locks.get(pid, False):
+                shot_locks[pid] = False
+
+            if is_shooting and not shot_locks[pid]:
+                shot_locks[pid] = True
+                stats = get_weapon_stats(player.get("weapon", "basic"))
                 bx = player["x"] + TANK_SIZE // 2
                 by = player["y"] + TANK_SIZE // 2
-                if player["dir"] == "up":
-                    dx_b, dy_b = 0, -BULLET_SPEED
-                elif player["dir"] == "down":
-                    dx_b, dy_b = 0, BULLET_SPEED
-                elif player["dir"] == "left":
-                    dx_b, dy_b = -BULLET_SPEED, 0
-                else:
-                    dx_b, dy_b = BULLET_SPEED, 0
-                bullets.append({"x": bx, "y": by, "dx": dx_b, "dy": dy_b, "owner": pid})
+                base_angle = {"right": 0, "down": 90, "left": 180, "up": -90}.get(player["dir"], -90)
+                count = max(1, stats.get("count", 1))
+                spread = stats.get("spread_deg", 0)
+                for i in range(count):
+                    angle = base_angle
+                    if count > 1:
+                        offset = i - (count - 1) / 2
+                        angle += spread * offset
+                    rad = math.radians(angle)
+                    speed = stats.get("speed", BULLET_SPEED)
+                    dx_b = math.cos(rad) * speed
+                    dy_b = math.sin(rad) * speed
+                    bullets.append({
+                        "x": bx,
+                        "y": by,
+                        "dx": dx_b,
+                        "dy": dy_b,
+                        "owner": pid,
+                        "dmg": stats.get("damage", 1),
+                    })
+            elif not is_shooting:
+                shot_locks[pid] = False
 
-    with lock:
+        # update bullets + hits
         new_bullets = []
         for b in bullets:
             b["x"] += b["dx"]
@@ -118,24 +214,79 @@ def update_game(dt):
                     continue
                 if (p["x"] < b["x"] < p["x"] + TANK_SIZE and
                     p["y"] < b["y"] < p["y"] + TANK_SIZE):
-                    p["hp"] -= 1
+                    p["hp"] -= b.get("dmg", 1)
                     print(f"[SERVER] Player {pid} hit! HP = {p['hp']}")
                     if p["hp"] <= 0:
                         print(f"[SERVER] Player {pid} died. Respawning.")
                         new_state = create_new_player()
                         players[pid].update(new_state)
+                        _clear_traps(pid)
                     hit_any = True
                     break
             if not hit_any:
                 new_bullets.append(b)
         bullets = new_bullets
 
+        # powerup pickups
+        kept_powerups = []
+        for p in powerups:
+            claimed = False
+            for pid, player in players.items():
+                if _rect_hit(player["x"], player["y"], TANK_SIZE, p["x"], p["y"], POWERUP_SIZE):
+                    player["weapon"] = p["type"]
+                    player["weapon_expires"] = now + POWERUP_DURATION
+                    claimed = True
+                    break
+            if not claimed:
+                kept_powerups.append(p)
+        powerups = kept_powerups
+
+        # trap hits
+        kept_traps = []
+        for t in traps:
+            triggered = False
+            for pid, player in players.items():
+                if pid == t["owner"]:
+                    continue
+                if _rect_hit(player["x"], player["y"], TANK_SIZE, t["x"], t["y"], TRAP_SIZE):
+                    player["hp"] -= TRAP_DAMAGE
+                    print(f"[SERVER] Player {pid} hit a trap! HP = {player['hp']}")
+                    if player["hp"] <= 0:
+                        print(f"[SERVER] Player {pid} died from trap. Respawning.")
+                        new_state = create_new_player()
+                        players[pid].update(new_state)
+                        _clear_traps(pid)
+                    owner = players.get(t["owner"])
+                    if owner:
+                        owner["active_traps"] = max(0, owner.get("active_traps", 0) - 1)
+                    triggered = True
+                    break
+            if not triggered:
+                kept_traps.append(t)
+        traps = kept_traps
+
 def broadcast_state(connections):
     with lock:
+        now = time.time()
+        export_players = {}
+        for pid, p in players.items():
+            export_players[pid] = {
+                "x": p["x"],
+                "y": p["y"],
+                "dir": p["dir"],
+                "hp": p["hp"],
+                "weapon": p.get("weapon", "basic"),
+                "weapon_timer": max(0.0, p.get("weapon_expires", 0) - now),
+                "trap_cooldown": max(0.0, p.get("trap_ready_at", 0) - now),
+                "active_traps": p.get("active_traps", 0),
+            }
+
         state = {
             "type": "state",
-            "players": players,
-            "bullets": bullets,
+            "players": export_players,
+            "bullets": [dict(b) for b in bullets],
+            "powerups": list(powerups),
+            "traps": list(traps),
         }
         data = (json.dumps(state) + "\n").encode()
 
@@ -168,6 +319,8 @@ def main():
                 next_player_id += 1
                 players[pid] = create_new_player()
                 inputs[pid] = {}
+                shot_locks[pid] = False
+                trap_locks[pid] = False
             connections.append(conn)
             threading.Thread(target=handle_client, args=(conn, addr, pid), daemon=True).start()
 
