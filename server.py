@@ -115,6 +115,11 @@ def _clear_traps(owner_id: int):
     traps = [t for t in traps if t["owner"] != owner_id]
 
 
+def _bullet_rect(bullet):
+    half = BULLET_SIZE / 2
+    return bullet["x"] - half, bullet["y"] - half, BULLET_SIZE, BULLET_SIZE
+
+
 def update_game(dt):
     global players, bullets, traps, powerups
     now = time.time()
@@ -215,7 +220,7 @@ def update_game(dt):
                 shot_locks[pid] = False
 
         # update bullets + hits
-        new_bullets = []
+        moved_bullets = []
         for b in bullets:
             b["x"] += b["dx"]
             b["y"] += b["dy"]
@@ -223,7 +228,27 @@ def update_game(dt):
             if (b["x"] < 0 or b["x"] > SCREEN_WIDTH or
                 b["y"] < 0 or b["y"] > SCREEN_HEIGHT):
                 continue
+            moved_bullets.append(b)
 
+        # bullet vs bullet collisions (remove both on hit, only if different owners)
+        to_remove = set()
+        for i in range(len(moved_bullets)):
+            if i in to_remove:
+                continue
+            x1, y1, _, _ = _bullet_rect(moved_bullets[i])
+            for j in range(i + 1, len(moved_bullets)):
+                if j in to_remove:
+                    continue
+                if moved_bullets[i]["owner"] == moved_bullets[j]["owner"]:
+                    continue
+                x2, y2, _, _ = _bullet_rect(moved_bullets[j])
+                if _rect_hit(x1, y1, BULLET_SIZE, x2, y2, BULLET_SIZE):
+                    to_remove.add(i)
+                    to_remove.add(j)
+        survived_bullets = [b for idx, b in enumerate(moved_bullets) if idx not in to_remove]
+
+        new_bullets = []
+        for b in survived_bullets:
             hit_any = False
             for pid, p in players.items():
                 if pid == b["owner"]:

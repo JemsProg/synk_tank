@@ -25,6 +25,16 @@ from weapons import (
 # Allow overriding the server IP via CLI arg or env var for easy LAN setup.
 DEFAULT_SERVER_IP = "192.168.0.136"
 
+BULLET_PALETTE = [
+    (255, 255, 255),
+    (255, 180, 80),
+    (80, 200, 255),
+    (255, 80, 160),
+    (180, 255, 120),
+    (200, 160, 255),
+    (120, 255, 220),
+]
+
 player_id = None
 players = {}
 bullets = []
@@ -43,6 +53,16 @@ keys_state = {
 }
 
 running = True
+
+
+def bullet_color_for_owner(owner):
+    if owner is None:
+        return COLOR_BULLET
+    try:
+        idx = (int(owner) - 1) % len(BULLET_PALETTE)
+        return BULLET_PALETTE[idx]
+    except Exception:
+        return COLOR_BULLET
 
 def network_thread(sock):
     global player_id, players, bullets, powerups, traps, running
@@ -281,9 +301,10 @@ def main():
         for b in current_bullets:
             bx = int(b["x"])
             by = int(b["y"])
+            color = bullet_color_for_owner(b.get("owner"))
             pygame.draw.rect(
                 screen,
-                COLOR_BULLET,
+                color,
                 pygame.Rect(bx - BULLET_SIZE // 2, by - BULLET_SIZE // 2, BULLET_SIZE, BULLET_SIZE)
             )
 
