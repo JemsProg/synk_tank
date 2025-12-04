@@ -13,8 +13,9 @@ from game_config import (
     POWERUP_SIZE, TRAP_SIZE, TRAP_MAX_ACTIVE,
     COLOR_BG,
     COLOR_TANK_1, COLOR_TANK_2, COLOR_TANK_OTHER,
-    COLOR_BULLET, COLOR_TEXT, COLOR_POWERUP, COLOR_TRAP,
-    SERVER_PORT
+    COLOR_BULLET, COLOR_TEXT, COLOR_POWERUP, COLOR_TRAP, COLOR_WALL,
+    SERVER_PORT,
+    OBSTACLES,
 )
 
 from weapons import (
@@ -279,6 +280,15 @@ def main():
             current_traps = list(traps)
 
         screen.blit(map_bg, (0, 0))
+
+        # draw obstacles
+        for ob in OBSTACLES:
+            pygame.draw.rect(
+                screen,
+                COLOR_WALL,
+                pygame.Rect(int(ob["x"]), int(ob["y"]), int(ob["w"]), int(ob["h"])),
+                border_radius=6,
+            )
 
         # draw powerups
         for p in current_powerups:

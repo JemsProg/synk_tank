@@ -14,7 +14,8 @@ from game_config import (
     POWERUP_SIZE, POWERUP_RESPAWN_TIME, POWERUP_MAX, POWERUP_DURATION,
     TRAP_SIZE, TRAP_DAMAGE, TRAP_COOLDOWN, TRAP_MAX_ACTIVE,
     SERVER_TICK_RATE,
-    SERVER_HOST, SERVER_PORT
+    SERVER_HOST, SERVER_PORT,
+    OBSTACLES,
 )
 
 players = {}      # player_id -> {x, y, dir, hp, weapon, weapon_expires, trap_ready_at, active_traps}
@@ -40,8 +41,14 @@ def get_weapon_stats(name: str):
     return WEAPON_STATS.get(name, WEAPON_STATS["basic"])
 
 def create_new_player():
-    x = random.randint(TANK_SIZE, SCREEN_WIDTH - TANK_SIZE)
-    y = random.randint(TANK_SIZE, SCREEN_HEIGHT - TANK_SIZE)
+    for _ in range(200):
+        x = random.randint(TANK_SIZE, SCREEN_WIDTH - TANK_SIZE)
+        y = random.randint(TANK_SIZE, SCREEN_HEIGHT - TANK_SIZE)
+        if not _collides_obstacle(x, y, TANK_SIZE):
+            break
+    else:
+        x = SCREEN_WIDTH // 2
+        y = SCREEN_HEIGHT // 2
     return {
         "x": x,
         "y": y,
@@ -98,8 +105,13 @@ def _spawn_powerups(now: float):
         return
     if now - last_powerup_spawn < POWERUP_RESPAWN_TIME:
         return
-    px = random.randint(POWERUP_SIZE, SCREEN_WIDTH - POWERUP_SIZE)
-    py = random.randint(POWERUP_SIZE, SCREEN_HEIGHT - POWERUP_SIZE)
+    for _ in range(100):
+        px = random.randint(POWERUP_SIZE, SCREEN_WIDTH - POWERUP_SIZE)
+        py = random.randint(POWERUP_SIZE, SCREEN_HEIGHT - POWERUP_SIZE)
+        if not _collides_obstacle(px, py, POWERUP_SIZE):
+            break
+    else:
+        return
     ptype = random.choice(["rapid", "heavy", "spread"])
     powerups.append({"x": px, "y": py, "type": ptype})
     last_powerup_spawn = now
@@ -110,6 +122,11 @@ def _rect_hit(x1, y1, size1, x2, y2, size2):
             y1 < y2 + size2 and y1 + size1 > y2)
 
 
+def _rect_overlap(x1, y1, w1, h1, x2, y2, w2, h2):
+    return (x1 < x2 + w2 and x1 + w1 > x2 and
+            y1 < y2 + h2 and y1 + h1 > y2)
+
+
 def _clear_traps(owner_id: int):
     global traps
     traps = [t for t in traps if t["owner"] != owner_id]
@@ -118,6 +135,13 @@ def _clear_traps(owner_id: int):
 def _bullet_rect(bullet):
     half = BULLET_SIZE / 2
     return bullet["x"] - half, bullet["y"] - half, BULLET_SIZE, BULLET_SIZE
+
+
+def _collides_obstacle(x, y, size):
+    for ob in OBSTACLES:
+        if _rect_overlap(x, y, size, size, ob["x"], ob["y"], ob["w"], ob["h"]):
+            return True
+    return False
 
 
 def update_game(dt):
@@ -153,8 +177,13 @@ def update_game(dt):
                 dx += TANK_SPEED
                 player["dir"] = "right"
 
-            player["x"] = max(0, min(SCREEN_WIDTH - TANK_SIZE, player["x"] + dx))
-            player["y"] = max(0, min(SCREEN_HEIGHT - TANK_SIZE, player["y"] + dy))
+            old_x, old_y = player["x"], player["y"]
+            new_x = max(0, min(SCREEN_WIDTH - TANK_SIZE, old_x + dx))
+            if not _collides_obstacle(new_x, old_y, TANK_SIZE):
+                player["x"] = new_x
+            new_y = max(0, min(SCREEN_HEIGHT - TANK_SIZE, old_y + dy))
+            if not _collides_obstacle(player["x"], new_y, TANK_SIZE):
+                player["y"] = new_y
 
             # update facing based on cursor to keep turret following aim
             aim_angle = None
@@ -227,6 +256,9 @@ def update_game(dt):
 
             if (b["x"] < 0 or b["x"] > SCREEN_WIDTH or
                 b["y"] < 0 or b["y"] > SCREEN_HEIGHT):
+                continue
+            bx, by, _, _ = _bullet_rect(b)
+            if _collides_obstacle(bx, by, BULLET_SIZE):
                 continue
             moved_bullets.append(b)
 

@@ -31,3 +31,15 @@ COLOR_BULLET = (255, 255, 255)
 COLOR_TEXT = (255, 255, 255)
 COLOR_POWERUP = (255, 140, 0)
 COLOR_TRAP = (220, 60, 60)
+COLOR_WALL = (70, 80, 90)
+
+# Static obstacles (x, y, width, height)
+OBSTACLES = [
+    {"x": SCREEN_WIDTH // 2 - 100, "y": SCREEN_HEIGHT // 2 - 30, "w": 200, "h": 60},
+    {"x": SCREEN_WIDTH // 4 - 150, "y": SCREEN_HEIGHT // 3 - 20, "w": 300, "h": 40},
+    {"x": 3 * SCREEN_WIDTH // 4 - 150, "y": SCREEN_HEIGHT // 3 - 20, "w": 300, "h": 40},
+    {"x": SCREEN_WIDTH // 4 - 150, "y": 2 * SCREEN_HEIGHT // 3 - 20, "w": 300, "h": 40},
+    {"x": 3 * SCREEN_WIDTH // 4 - 150, "y": 2 * SCREEN_HEIGHT // 3 - 20, "w": 300, "h": 40},
+    {"x": SCREEN_WIDTH // 2 - 30, "y": SCREEN_HEIGHT // 4 - 100, "w": 60, "h": 200},
+    {"x": SCREEN_WIDTH // 2 - 30, "y": 3 * SCREEN_HEIGHT // 4 - 100, "w": 60, "h": 200},
+]
