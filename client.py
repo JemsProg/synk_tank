@@ -23,7 +23,7 @@ from weapons import (
 )
 
 # Allow overriding the server IP via CLI arg or env var for easy LAN setup.
-DEFAULT_SERVER_IP = "127.0.0.1"
+DEFAULT_SERVER_IP = "192.168.0.136"
 
 player_id = None
 players = {}
@@ -39,6 +39,7 @@ keys_state = {
     "right": False,
     "shoot": False,
     "trap": False,
+    "mouse_pos": (0, 0),
 }
 
 running = True
@@ -139,7 +140,7 @@ def draw_hud(screen, font, small_font, panel_img, fps, server_ip, current_player
     y += 22
     controls = [
         "Move: WASD / Arrows",
-        "Shoot: Space",
+        "Shoot: Left Mouse",
         "Trap: E",
         "Quit: Esc / Close",
     ]
@@ -207,6 +208,9 @@ def main():
     while running:
         dt = clock.tick(60) / 1000.0
 
+        # sync cursor position every frame for aiming
+        keys_state["mouse_pos"] = pygame.mouse.get_pos()
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -222,8 +226,6 @@ def main():
                     keys_state["left"] = True
                 if event.key in (pygame.K_d, pygame.K_RIGHT):
                     keys_state["right"] = True
-                if event.key == pygame.K_SPACE:
-                    keys_state["shoot"] = True
                 if event.key == pygame.K_e:
                     keys_state["trap"] = True
 
@@ -236,10 +238,17 @@ def main():
                     keys_state["left"] = False
                 if event.key in (pygame.K_d, pygame.K_LEFT):
                     keys_state["right"] = False
-                if event.key == pygame.K_SPACE:
-                    keys_state["shoot"] = False
                 if event.key == pygame.K_e:
                     keys_state["trap"] = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    keys_state["shoot"] = True
+                    keys_state["mouse_pos"] = event.pos
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1:
+                    keys_state["shoot"] = False
+            elif event.type == pygame.MOUSEMOTION:
+                keys_state["mouse_pos"] = event.pos
 
         send_input(sock)
 

@@ -131,6 +131,7 @@ def update_game(dt):
         # movement + actions
         for pid, player in players.items():
             keys = inputs.get(pid, {})
+            mouse_pos = keys.get("mouse_pos")
 
             dx = 0
             dy = 0
@@ -149,6 +150,21 @@ def update_game(dt):
 
             player["x"] = max(0, min(SCREEN_WIDTH - TANK_SIZE, player["x"] + dx))
             player["y"] = max(0, min(SCREEN_HEIGHT - TANK_SIZE, player["y"] + dy))
+
+            # update facing based on cursor to keep turret following aim
+            aim_angle = None
+            center_x = player["x"] + TANK_SIZE // 2
+            center_y = player["y"] + TANK_SIZE // 2
+            if isinstance(mouse_pos, (list, tuple)) and len(mouse_pos) == 2:
+                mx, my = mouse_pos
+                aim_dx = mx - center_x
+                aim_dy = my - center_y
+                if aim_dx != 0 or aim_dy != 0:
+                    aim_angle = math.degrees(math.atan2(aim_dy, aim_dx))
+                    if abs(aim_dx) > abs(aim_dy):
+                        player["dir"] = "right" if aim_dx > 0 else "left"
+                    else:
+                        player["dir"] = "down" if aim_dy > 0 else "up"
 
             # traps
             is_trap = keys.get("trap", False)
@@ -173,9 +189,9 @@ def update_game(dt):
             if is_shooting and not shot_locks[pid]:
                 shot_locks[pid] = True
                 stats = get_weapon_stats(player.get("weapon", "basic"))
-                bx = player["x"] + TANK_SIZE // 2
-                by = player["y"] + TANK_SIZE // 2
-                base_angle = {"right": 0, "down": 90, "left": 180, "up": -90}.get(player["dir"], -90)
+                bx = center_x
+                by = center_y
+                base_angle = aim_angle if aim_angle is not None else {"right": 0, "down": 90, "left": 180, "up": -90}.get(player["dir"], -90)
                 count = max(1, stats.get("count", 1))
                 spread = stats.get("spread_deg", 0)
                 for i in range(count):
